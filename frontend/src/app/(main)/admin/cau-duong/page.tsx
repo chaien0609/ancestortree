@@ -375,6 +375,89 @@ function AssignDialog({
   );
 }
 
+// ─── Edit Assignment Dialog ──────────────────────────────────────────────────
+
+function EditAssignmentDialog({
+  assignment,
+  eligibleMembers,
+  allPeople,
+  onConfirm,
+  isPending,
+}: {
+  assignment: { id: string; host_person_id?: string; host_person?: { display_name: string } | null };
+  eligibleMembers: { person: { id: string; display_name: string; generation?: number }; ageLunar: number }[];
+  allPeople: { id: string; display_name: string; generation?: number }[];
+  onConfirm: (hostPersonId: string) => void;
+  isPending: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState('');
+
+  const handleOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (isOpen) {
+      setSelectedId(assignment.host_person_id ?? '');
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedId) { toast.error('Chọn người thực hiện'); return; }
+    onConfirm(selectedId);
+    setOpen(false);
+  };
+
+  // Show eligible members first, then all people as fallback
+  const selectedName = eligibleMembers.find(m => m.person.id === selectedId)?.person.display_name
+    || allPeople.find(p => p.id === selectedId)?.display_name
+    || '...';
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Pencil className="h-3.5 w-3.5 mr-1" />
+          Sửa
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Sửa phân công</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <Label>Hiện tại: <span className="font-medium">{assignment.host_person?.display_name ?? '—'}</span></Label>
+          </div>
+          <div>
+            <Label>Đổi sang *</Label>
+            <Select value={selectedId} onValueChange={setSelectedId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Chọn thành viên" />
+              </SelectTrigger>
+              <SelectContent>
+                {eligibleMembers.length > 0 && (
+                  <>
+                    {eligibleMembers.map((m, idx) => (
+                      <SelectItem key={m.person.id} value={m.person.id}>
+                        {idx + 1}. {m.person.display_name}
+                        {m.person.generation ? ` (Đời ${m.person.generation})` : ''}
+                        {m.ageLunar > 0 ? ` — ${m.ageLunar} tuổi` : ''}
+                      </SelectItem>
+                    ))}
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button type="submit" disabled={isPending || !selectedId || selectedId === (assignment.host_person_id ?? '')} className="w-full">
+            {isPending ? 'Đang lưu...' : `Đổi sang ${selectedName}`}
+          </Button>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AdminCauDuongPage() {
@@ -456,6 +539,22 @@ export default function AdminCauDuongPage() {
       toast.success(`Đã phân công ${CAU_DUONG_CEREMONY_LABELS[ceremonyType]} cho ${hostName}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Lỗi khi phân công');
+    }
+  };
+
+  const handleEditAssignment = async (assignmentId: string, hostPersonId: string) => {
+    if (!poolId) return;
+    try {
+      await updateAssignmentMutation.mutateAsync({
+        id: assignmentId,
+        poolId,
+        input: { host_person_id: hostPersonId },
+      });
+      const hostName = eligibleMembers?.find(m => m.person.id === hostPersonId)?.person.display_name
+        || people?.find(p => p.id === hostPersonId)?.display_name;
+      toast.success(`Đã đổi phân công cho ${hostName}`);
+    } catch {
+      toast.error('Lỗi khi sửa phân công');
     }
   };
 
@@ -645,14 +744,23 @@ export default function AdminCauDuongPage() {
 
                       <div className="flex items-center gap-2 flex-wrap">
                         {assignment && (
-                          <Badge
-                            variant={
-                              assignment.status === 'completed' ? 'default' :
-                              assignment.status === 'cancelled' ? 'destructive' : 'secondary'
-                            }
-                          >
-                            {STATUS_LABELS[assignment.status]}
-                          </Badge>
+                          <>
+                            <Badge
+                              variant={
+                                assignment.status === 'completed' ? 'default' :
+                                assignment.status === 'cancelled' ? 'destructive' : 'secondary'
+                              }
+                            >
+                              {STATUS_LABELS[assignment.status]}
+                            </Badge>
+                            <EditAssignmentDialog
+                              assignment={assignment}
+                              eligibleMembers={eligibleMembers || []}
+                              allPeople={people || []}
+                              onConfirm={(hostPersonId) => handleEditAssignment(assignment.id, hostPersonId)}
+                              isPending={updateAssignmentMutation.isPending}
+                            />
+                          </>
                         )}
 
                         {!assignment && eligibleMembers && eligibleMembers.length > 0 && (
